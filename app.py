@@ -1,29 +1,18 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-import folium
-from streamlit_folium import st_folium
-from scipy.stats import mannwhitneyu
+import plotly.express as px
 
 st.set_page_config(page_title="Flight Analysis", layout="wide")
 
-st.title("Flight Analysis Dashboard")
+st.title("✈️ Flight Analysis Dashboard")
 st.markdown("Analysis of air ticket price structure for domestic flights in India")
 st.markdown("---")
-
-st.info(
-    "This dashboard explores factors affecting ticket prices: airline, travel class, "
-    "number of stops, flight duration, and days before departure. "
-    "Use the sidebar to navigate between sections."
-)
 
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
     "Choose section",
-    ["Overview", "Route Map", "Price Analysis"]
+    ["Overview", "Route Map", "Price Explorer"]
 )
 
 @st.cache_data
@@ -39,6 +28,14 @@ df = load_data()
 if page == "Overview":
     st.header("Overview")
 
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total flights", f"{len(df):,}")
+    col2.metric("Airlines", df["airline"].nunique())
+    col3.metric("Routes", df["source_city"].nunique())
+    col4.metric("Avg price", f"₹{df['price'].mean():,.0f}")
+
+    st.markdown("---")
+
     st.subheader("Dataset Description")
     st.markdown("""
     The dataset contains information about domestic flights in India.  
@@ -52,51 +49,26 @@ if page == "Overview":
     - **Price** – ticket price in INR  
     """)
 
-    st.subheader("Data Cleanliness")
+    st.subheader("Data Quality")
     missing = df.isnull().sum().sum()
     duplicates = df.duplicated().sum()
-    st.write(f"Missing values: {missing}")
-    st.write(f"Duplicate rows: {duplicates}")
     if missing == 0 and duplicates == 0:
-        st.success("The dataset is clean (no missing values or duplicates).")
-    else:
-        st.warning("Data needs cleaning.")
+        st.success("No missing values or duplicates — dataset is clean.")
 
     st.subheader("Descriptive Statistics")
     num_cols = ["price", "duration", "days_left", "num_stops"]
     stats = df[num_cols].agg(["mean", "median", "std"]).round(2)
-    st.dataframe(stats)
+    st.dataframe(stats, use_container_width=True)
 
-    st.subheader("Basic Data Distribution")
-
-    # 1. Гистограмма цены
-    fig1, ax1 = plt.subplots(figsize=(10,5))
-    sns.histplot(df["price"], bins=60, kde=True, color="steelblue", ax=ax1)
-    ax1.axvline(df["price"].median(), color="tomato", linestyle="--", label=f"Median: {df['price'].median():,.0f}")
-    ax1.axvline(df["price"].mean(), color="orange", linestyle="--", label=f"Mean: {df['price'].mean():,.0f}")
-    ax1.set_title("Ticket Price Distribution")
-    ax1.set_xlabel("Price (INR)")
-    ax1.legend()
-    st.pyplot(fig1)
-
-    # 2. Scatter plot длительность vs цена
-    fig2, ax2 = plt.subplots(figsize=(10,5))
-    sns.scatterplot(data=df, x="duration", y="price", alpha=0.3, hue="class", ax=ax2)
-    ax2.set_title("Flight Duration vs Price")
-    ax2.set_xlabel("Duration (hours)")
-    ax2.set_ylabel("Price (INR)")
-    st.pyplot(fig2)
-
-    # 3. Столбчатая диаграмма средней цены по авиакомпаниям
-    fig3, ax3 = plt.subplots(figsize=(10,5))
-    airline_avg = df.groupby("airline")["price"].mean().sort_values()
-    airline_avg.plot(kind="bar", color="steelblue", ax=ax3)
-    ax3.set_title("Average Price by Airline")
-    ax3.set_ylabel("Price (INR)")
-    ax3.tick_params(axis='x', rotation=45)
-    st.pyplot(fig3)
-
-    st.markdown("Most tickets cost under 20 000 INR. Business class flights create a long right tail in the distribution.")
+    st.markdown("---")
+    if st.button("🎲 Show random flight"):
+        st.balloons()
+        flight = df.sample(1).iloc[0]
+        st.subheader(f"✈️ {flight['source_city']} → {flight['destination_city']}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Airline", flight["airline"])
+        col2.metric("Price", f"₹{flight['price']:,.0f}")
+        col3.metric("Class", flight["class"])
 
 # ==================== ROUTE MAP ====================
 elif page == "Route Map":
@@ -135,39 +107,43 @@ elif page == "Route Map":
     if ticket_class != "Both":
         route_flights = route_flights[route_flights["class"] == ticket_class]
 
-    # --- Создание карты Folium ---
-    center_lat = (src[0] + dst[0]) / 2
-    center_lon = (src[1] + dst[1]) / 2
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=5)
-
-    # Скрыть attribution (надпись Leaflet/OSM)
-    st.markdown("""
-    <style>
-    .leaflet-control-attribution {
-        display: none !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    fig_map = go.Figure()
 
     for city, coords in city_coords.items():
-        folium.Marker(
-            location=coords,
-            popup=city,
-            tooltip=city,
-            icon=folium.Icon(color="blue", icon="cloud", prefix="fa")
-        ).add_to(m)
+        fig_map.add_trace(go.Scattergeo(
+            lon=[coords[1]], lat=[coords[0]],
+            mode="markers+text",
+            marker=dict(size=10, color="steelblue"),
+            text=city, textposition="top center",
+            showlegend=False
+        ))
 
-    folium.PolyLine(
-        locations=[src, dst],
-        color="red",
-        weight=3,
-        opacity=0.8,
-        tooltip=f"{source} → {dest}"
-    ).add_to(m)
+    fig_map.add_trace(go.Scattergeo(
+        lon=[src[1], dst[1]], lat=[src[0], dst[0]],
+        mode="lines+markers",
+        line=dict(width=3, color="tomato"),
+        marker=dict(size=12, color="tomato"),
+        name=f"{source} → {dest}",
+    ))
 
-    st_data = st_folium(m, width=725)
+    fig_map.update_layout(
+        geo=dict(
+            scope="asia", showland=True,
+            landcolor="rgb(210, 235, 210)",
+            showocean=True, oceancolor="rgb(180, 210, 250)",
+            showcountries=True, countrycolor="white",
+            showcoastlines=True, coastlinecolor="white",
+            showlakes=True, lakecolor="rgb(180, 210, 250)",
+            showrivers=True, rivercolor="rgb(180, 210, 250)",
+            center=dict(lat=20, lon=80), projection_scale=4,
+            bgcolor="rgb(240, 248, 255)",
+        ),
+        paper_bgcolor="rgb(240, 248, 255)",
+        margin=dict(l=0, r=0, t=30, b=0), height=500,
+    )
 
-    # Статистика
+    st.plotly_chart(fig_map, use_container_width=True)
+
     if len(route_flights) > 0:
         st.success(f"**{len(route_flights)} direct flights** from {source} to {dest} (class: {ticket_class})")
         col1, col2, col3 = st.columns(3)
@@ -179,87 +155,161 @@ elif page == "Route Map":
     else:
         st.info(f"No direct flights found for {source} → {dest} with class {ticket_class}.")
 
-# ==================== PRICE ANALYSIS ====================
-else:  # Price Analysis
-    st.header("Price Analysis")
+    st.subheader("📈 Price by Departure Time")
+    time_order = ["Early_Morning", "Morning", "Afternoon", "Evening", "Night", "Late_Night"]
+    route_all = df[(df["source_city"] == source) & (df["destination_city"] == dest)]
+    if ticket_class != "Both":
+        route_all = route_all[route_all["class"] == ticket_class]
 
-    # Кнопка 1: процент рейсов с пересадками
-    if st.button("🔄 Show percentage of flights with stops"):
-        stops_pct = df["num_stops"].value_counts(normalize=True) * 100
-        stops_pct = stops_pct.rename({0: "Zero stops", 1: "One stop", 2: "Two or more stops"})
-        fig_stops, ax_stops = plt.subplots()
-        stops_pct.plot(kind="pie", autopct="%1.1f%%", ax=ax_stops)
-        ax_stops.set_title("Flights by number of stops")
-        ax_stops.set_ylabel("")
-        st.pyplot(fig_stops)
-        st.write("**Detailed percentages:**")
-        st.dataframe(stops_pct.reset_index().rename(columns={"index": "Stops", 0: "Percent"}))
+    price_by_time = (
+        route_all.groupby("departure_time")["price"]
+        .median().reindex(time_order).dropna()
+    )
 
-    # Кнопка 2: распределение по времени вылета
-    if st.button("⏰ Show departure time distribution"):
-        dep_counts = df["departure_time"].value_counts()
-        fig_dep, ax_dep = plt.subplots()
-        dep_counts.plot(kind="bar", color="steelblue", ax=ax_dep)
-        ax_dep.set_title("Number of flights by departure time")
-        ax_dep.set_xlabel("Departure time")
-        ax_dep.set_ylabel("Count")
-        st.pyplot(fig_dep)
-
-    # 1. Boxplot цены по авиакомпаниям и классам
-    st.subheader("Price Distribution by Airline and Class")
-    fig, ax = plt.subplots(figsize=(12, 6))
-    sns.boxplot(data=df, x="airline", y="price", hue="class", ax=ax)
-    ax.set_title("Ticket Price by Airline and Class")
-    ax.set_xlabel("Airline")
-    ax.set_ylabel("Price (INR)")
-    ax.tick_params(axis='x', rotation=45)
-    st.pyplot(fig)
-
-    # 2. График медианной цены от дней до вылета (по классам)
-    st.subheader("Median Price vs Days Before Departure")
-    fig, ax = plt.subplots(figsize=(10,5))
-    for cls in df["class"].unique():
-        subset = df[df["class"] == cls].groupby("days_left")["price"].median()
-        ax.plot(subset.index, subset.values, label=cls)
-    ax.set_title("Median Price vs Days Left Before Departure")
-    ax.set_xlabel("Days left")
-    ax.set_ylabel("Median price (INR)")
-    ax.legend()
-    st.pyplot(fig)
-    st.markdown("Prices rise as departure approaches. The effect is stronger for Business class.")
-
-    # 3. Тепловая карта корреляции
-    st.subheader("Correlation Heatmap")
-    corr = df[["price", "duration", "days_left", "num_stops"]].corr()
-    fig, ax = plt.subplots(figsize=(6, 4))
-    sns.heatmap(corr, annot=True, cmap="coolwarm", fmt=".2f", ax=ax)
-    ax.set_title("Correlation Between Numerical Features")
-    st.pyplot(fig)
-
-    # 4. Проверка гипотез
-    st.subheader("Hypothesis Testing")
-
-    # Гипотеза 1: Бизнес-класс дороже эконома
-    st.write("**Hypothesis 1:** Business class tickets are more expensive than Economy.")
-    economy_prices = df[df["class"] == "Economy"]["price"]
-    business_prices = df[df["class"] == "Business"]["price"]
-    stat, p1 = mannwhitneyu(economy_prices, business_prices, alternative='less')
-    st.write(f"Mann-Whitney U test p-value: {p1:.5f}")
-    if p1 < 0.05:
-        st.success("Reject H₀: Business class tickets are significantly more expensive.")
+    if len(price_by_time) > 0:
+        fig_line = go.Figure()
+        fig_line.add_trace(go.Scatter(
+            x=price_by_time.index, y=price_by_time.values,
+            mode="lines+markers",
+            line=dict(color="steelblue", width=3),
+            marker=dict(size=10, color="tomato"),
+            fill="tozeroy", fillcolor="rgba(70, 130, 180, 0.15)",
+            name="Median price",
+        ))
+        fig_line.update_layout(
+            title=f"Median price by departure time ({source} → {dest})",
+            xaxis_title="Departure time", yaxis_title="Median price (INR)",
+            height=400, hovermode="x unified", plot_bgcolor="white",
+            yaxis=dict(gridcolor="rgb(230,230,230)"),
+        )
+        st.plotly_chart(fig_line, use_container_width=True)
     else:
-        st.warning("Cannot reject H₀.")
+        st.info("Not enough data to build the chart for this route.")
 
-    # Гипотеза 2: Раннее бронирование (days_left > 30) дешевле
-    st.write("**Hypothesis 2:** Tickets booked more than 30 days in advance are cheaper.")
-    df["early_booking"] = (df["days_left"] > 30).astype(int)
-    early = df[df["early_booking"] == 1]["price"]
-    late = df[df["early_booking"] == 0]["price"]
-    stat, p2 = mannwhitneyu(early, late, alternative='less')
-    st.write(f"Mann-Whitney U test p-value: {p2:.5f}")
-    if p2 < 0.05:
-        st.success("Reject H₀: Early booking is associated with lower prices.")
-    else:
-        st.warning("Cannot reject H₀.")
+# ==================== PRICE EXPLORER ====================
+else:
+    st.header("🔍 Price Explorer")
+    st.markdown("Use the filters to explore how price depends on different factors.")
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Filters")
+
+    selected_airlines = st.sidebar.multiselect(
+        "Airlines", df["airline"].unique().tolist(),
+        default=df["airline"].unique().tolist()
+    )
+    selected_class = st.sidebar.radio("Class", ["Both", "Economy", "Business"])
+    price_range = st.sidebar.slider(
+        "Price range (INR)",
+        int(df["price"].min()), int(df["price"].max()),
+        (int(df["price"].min()), int(df["price"].max()))
+    )
+    selected_stops = st.sidebar.multiselect(
+        "Number of stops", [0, 1, 2], default=[0, 1, 2]
+    )
+
+    filtered = df[
+        (df["airline"].isin(selected_airlines)) &
+        (df["price"] >= price_range[0]) &
+        (df["price"] <= price_range[1]) &
+        (df["num_stops"].isin(selected_stops))
+    ]
+    if selected_class != "Both":
+        filtered = filtered[filtered["class"] == selected_class]
+
+    st.markdown(f"**{len(filtered):,} flights match your filters**")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Avg price", f"₹{filtered['price'].mean():,.0f}" if len(filtered) > 0 else "—")
+    col2.metric("Median price", f"₹{filtered['price'].median():,.0f}" if len(filtered) > 0 else "—")
+    col3.metric("Avg duration", f"{filtered['duration'].mean():.1f}h" if len(filtered) > 0 else "—")
+
+    if len(filtered) == 0:
+        st.warning("No flights match your filters. Try adjusting them.")
+        st.stop()
+
+    st.markdown("---")
+
+    # График 1 — boxplot
+    st.subheader("Price by Airline")
+    fig1 = px.box(
+        filtered, x="airline", y="price", color="class",
+        title="Price distribution by airline",
+        labels={"price": "Price (INR)", "airline": "Airline"},
+        color_discrete_map={"Economy": "steelblue", "Business": "tomato"}
+    )
+    fig1.update_layout(plot_bgcolor="white", height=450)
+    st.plotly_chart(fig1, use_container_width=True)
+
+    # Анимированный график
+    st.subheader("🎬 Price by Airline over Days Before Departure")
+    st.caption("Press ▶ to animate — watch how prices change as departure approaches")
+
+    anim_data = (
+        filtered.groupby(["days_left", "airline"])["price"]
+        .median().reset_index()
+    )
+
+    fig_anim = px.bar(
+        anim_data,
+        x="airline", y="price",
+        animation_frame="days_left",
+        animation_group="airline",
+        color="airline",
+        range_y=[0, anim_data["price"].max() * 1.1],
+        title="Median price by airline — animated by days before departure",
+        labels={"price": "Median price (INR)", "airline": "Airline"},
+    )
+    fig_anim.update_layout(
+        plot_bgcolor="white", height=500,
+        showlegend=False,
+        yaxis=dict(gridcolor="rgb(230,230,230)"),
+    )
+    fig_anim.layout.updatemenus[0].buttons[0].args[1]["frame"]["duration"] = 100
+    fig_anim.layout.updatemenus[0].buttons[0].args[1]["transition"]["duration"] = 50
+
+    st.plotly_chart(fig_anim, use_container_width=True)
+
+    # График 2 — lines days_left
+    st.subheader("📈 How Price Changes with Days Before Departure")
+    fig2 = go.Figure()
+    for cls in filtered["class"].unique():
+        subset = filtered[filtered["class"] == cls].groupby("days_left")["price"].median()
+        fig2.add_trace(go.Scatter(
+            x=subset.index, y=subset.values,
+            mode="lines", name=cls,
+            fill="tozeroy" if cls == "Economy" else None,
+            fillcolor="rgba(70,130,180,0.1)",
+            line=dict(width=2.5)
+        ))
+    fig2.update_layout(
+        title="Median price vs days before departure",
+        xaxis_title="Days left", yaxis_title="Median price (INR)",
+        hovermode="x unified", plot_bgcolor="white",
+        yaxis=dict(gridcolor="rgb(230,230,230)"), height=400
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # График 3 — scatter
+    st.subheader("Duration vs Price")
+    fig3 = px.scatter(
+        filtered.sample(min(3000, len(filtered))),
+        x="duration", y="price", color="class",
+        opacity=0.4, title="Flight duration vs price",
+        labels={"duration": "Duration (hours)", "price": "Price (INR)"},
+        color_discrete_map={"Economy": "steelblue", "Business": "tomato"}
+    )
+    fig3.update_layout(plot_bgcolor="white", height=400)
+    st.plotly_chart(fig3, use_container_width=True)
+
+    # Таблица
+    st.subheader("Filtered Data")
+    with st.expander("Show table"):
+        st.dataframe(
+            filtered[["airline", "source_city", "destination_city",
+                      "class", "price", "duration", "days_left", "num_stops"]]
+            .sort_values("price").head(50),
+            use_container_width=True
+        )
 
     st.feedback("stars")
