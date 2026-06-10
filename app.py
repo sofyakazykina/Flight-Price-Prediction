@@ -2,10 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+import requests
 
 st.set_page_config(page_title="Flight Analysis", layout="wide")
 
-st.title("✈️ Flight Analysis Dashboard")
+st.title("Flight Analysis Dashboard")
 st.markdown("Analysis of air ticket price structure for domestic flights in India")
 st.markdown("---")
 
@@ -15,27 +16,43 @@ page = st.sidebar.radio(
     ["Overview", "Route Map", "Price Explorer"]
 )
 
-@st.cache_data
-def load_data():
-    df = pd.read_csv('Clean_Dataset.csv')
-    df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
-    df["price_per_hour"] = df["price"] / df["duration"]
-    return df
+API_URL = "http://localhost:8000"
 
-df = load_data()
+@st.cache_data(ttl=60)
+def load_data_from_api():
+    try:
+        resp = requests.get(f"{API_URL}/flights", params={"limit": 500000})
+        if resp.status_code == 200:
+            data = resp.json()
+            df = pd.DataFrame(data["flights"])
+            if "class" in df.columns:
+                df.rename(columns={"class": "class"}, inplace=True)
+            if "num_stops" not in df.columns and "stops" in df.columns:
+                df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
+            if "price_per_hour" not in df.columns:
+                df["price_per_hour"] = df["price"] / df["duration"]
+            return df
+        else:
+            st.error(f"API error: {resp.status_code}")
+            return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Could not connect to API: {e}")
+        return pd.DataFrame()
+
+df = load_data_from_api()
+
+if df.empty:
+    st.stop()
 
 # ==================== OVERVIEW ====================
 if page == "Overview":
     st.header("Overview")
-
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total flights", f"{len(df):,}")
     col2.metric("Airlines", df["airline"].nunique())
     col3.metric("Routes", df["source_city"].nunique())
     col4.metric("Avg price", f"₹{df['price'].mean():,.0f}")
-
     st.markdown("---")
-
     st.subheader("Dataset Description")
     st.markdown("""
     The dataset contains information about domestic flights in India.  
@@ -48,23 +65,19 @@ if page == "Overview":
     - **Days left** – days between booking and departure  
     - **Price** – ticket price in INR  
     """)
-
     st.subheader("Data Quality")
     missing = df.isnull().sum().sum()
     duplicates = df.duplicated().sum()
     if missing == 0 and duplicates == 0:
         st.success("No missing values or duplicates — dataset is clean.")
-
     st.subheader("Descriptive Statistics")
     num_cols = ["price", "duration", "days_left", "num_stops"]
     stats = df[num_cols].agg(["mean", "median", "std"]).round(2)
     st.dataframe(stats, use_container_width=True)
-
     st.markdown("---")
-    if st.button("🎲 Show random flight"):
-        st.balloons()
+    if st.button("Show random flight"):
         flight = df.sample(1).iloc[0]
-        st.subheader(f"✈️ {flight['source_city']} → {flight['destination_city']}")
+        st.subheader(f"Flight: {flight['source_city']} -> {flight['destination_city']}")
         col1, col2, col3 = st.columns(3)
         col1.metric("Airline", flight["airline"])
         col2.metric("Price", f"₹{flight['price']:,.0f}")
@@ -73,7 +86,6 @@ if page == "Overview":
 # ==================== ROUTE MAP ====================
 elif page == "Route Map":
     st.header("Route Map")
-
     city_coords = {
         "Delhi":     [28.6139, 77.2090],
         "Mumbai":    [19.0760, 72.8777],
@@ -83,22 +95,17 @@ elif page == "Route Map":
         "Hyderabad": [17.3850, 78.4867],
     }
     cities = list(city_coords.keys())
-
     col1, col2 = st.columns(2)
     with col1:
         source = st.selectbox("From", cities, index=0)
     with col2:
         dest = st.selectbox("To", cities, index=1)
-
     ticket_class = st.radio("Ticket class", ["Both", "Economy", "Business"], horizontal=True)
-
     if source == dest:
         st.warning("Please select different cities!")
         st.stop()
-
     src = city_coords[source]
     dst = city_coords[dest]
-
     route_flights = df[
         (df["source_city"] == source) &
         (df["destination_city"] == dest) &
@@ -106,9 +113,7 @@ elif page == "Route Map":
     ]
     if ticket_class != "Both":
         route_flights = route_flights[route_flights["class"] == ticket_class]
-
     fig_map = go.Figure()
-
     for city, coords in city_coords.items():
         fig_map.add_trace(go.Scattergeo(
             lon=[coords[1]], lat=[coords[0]],
@@ -117,15 +122,13 @@ elif page == "Route Map":
             text=city, textposition="top center",
             showlegend=False
         ))
-
     fig_map.add_trace(go.Scattergeo(
         lon=[src[1], dst[1]], lat=[src[0], dst[0]],
         mode="lines+markers",
         line=dict(width=3, color="tomato"),
         marker=dict(size=12, color="tomato"),
-        name=f"{source} → {dest}",
+        name=f"{source} -> {dest}",
     ))
-
     fig_map.update_layout(
         geo=dict(
             scope="asia", showland=True,
@@ -141,9 +144,7 @@ elif page == "Route Map":
         paper_bgcolor="rgb(240, 248, 255)",
         margin=dict(l=0, r=0, t=30, b=0), height=500,
     )
-
     st.plotly_chart(fig_map, use_container_width=True)
-
     if len(route_flights) > 0:
         st.success(f"**{len(route_flights)} direct flights** from {source} to {dest} (class: {ticket_class})")
         col1, col2, col3 = st.columns(3)
@@ -153,19 +154,16 @@ elif page == "Route Map":
         with st.expander("Show flights"):
             st.dataframe(route_flights[["airline", "class", "price", "duration"]].head(10))
     else:
-        st.info(f"No direct flights found for {source} → {dest} with class {ticket_class}.")
-
-    st.subheader("📈 Price by Departure Time")
+        st.info(f"No direct flights found for {source} -> {dest} with class {ticket_class}.")
+    st.subheader("Price by Departure Time")
     time_order = ["Early_Morning", "Morning", "Afternoon", "Evening", "Night", "Late_Night"]
     route_all = df[(df["source_city"] == source) & (df["destination_city"] == dest)]
     if ticket_class != "Both":
         route_all = route_all[route_all["class"] == ticket_class]
-
     price_by_time = (
         route_all.groupby("departure_time")["price"]
         .median().reindex(time_order).dropna()
     )
-
     if len(price_by_time) > 0:
         fig_line = go.Figure()
         fig_line.add_trace(go.Scatter(
@@ -177,7 +175,7 @@ elif page == "Route Map":
             name="Median price",
         ))
         fig_line.update_layout(
-            title=f"Median price by departure time ({source} → {dest})",
+            title=f"Median price by departure time ({source} -> {dest})",
             xaxis_title="Departure time", yaxis_title="Median price (INR)",
             height=400, hovermode="x unified", plot_bgcolor="white",
             yaxis=dict(gridcolor="rgb(230,230,230)"),
@@ -188,7 +186,7 @@ elif page == "Route Map":
 
 # ==================== PRICE EXPLORER ====================
 else:
-    st.header("🔍 Price Explorer")
+    st.header("Price Explorer")
     st.markdown("Use the filters to explore how price depends on different factors.")
 
     st.sidebar.markdown("---")
@@ -218,7 +216,6 @@ else:
         filtered = filtered[filtered["class"] == selected_class]
 
     st.markdown(f"**{len(filtered):,} flights match your filters**")
-
     col1, col2, col3 = st.columns(3)
     col1.metric("Avg price", f"₹{filtered['price'].mean():,.0f}" if len(filtered) > 0 else "—")
     col2.metric("Median price", f"₹{filtered['price'].median():,.0f}" if len(filtered) > 0 else "—")
@@ -230,7 +227,20 @@ else:
 
     st.markdown("---")
 
-    # График 1 — boxplot
+    # --- Демонстрация GET-запроса с двумя аргументами напрямую к API ---
+    with st.expander("Test API GET with two arguments"):
+        st.markdown("This sends a request to `/flights?airline=IndiGo&price_max=5000`")
+        if st.button("Run API GET test"):
+            params = {"airline": "IndiGo", "price_max": 5000}
+            resp = requests.get(f"{API_URL}/flights", params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                st.write(f"Total matching flights: {data['total_matching']}")
+                st.dataframe(pd.DataFrame(data["flights"]).head())
+            else:
+                st.error("API request failed")
+
+    # Boxplot
     st.subheader("Price by Airline")
     fig1 = px.box(
         filtered, x="airline", y="price", color="class",
@@ -241,15 +251,13 @@ else:
     fig1.update_layout(plot_bgcolor="white", height=450)
     st.plotly_chart(fig1, use_container_width=True)
 
-    # Анимированный график
-    st.subheader("🎬 Price by Airline over Days Before Departure")
-    st.caption("Press ▶ to animate — watch how prices change as departure approaches")
-
+    # Animated bar chart
+    st.subheader("Price by Airline over Days Before Departure")
+    st.caption("Press play to animate — watch how prices change as departure approaches")
     anim_data = (
         filtered.groupby(["days_left", "airline"])["price"]
         .median().reset_index()
     )
-
     fig_anim = px.bar(
         anim_data,
         x="airline", y="price",
@@ -260,18 +268,13 @@ else:
         title="Median price by airline — animated by days before departure",
         labels={"price": "Median price (INR)", "airline": "Airline"},
     )
-    fig_anim.update_layout(
-        plot_bgcolor="white", height=500,
-        showlegend=False,
-        yaxis=dict(gridcolor="rgb(230,230,230)"),
-    )
+    fig_anim.update_layout(plot_bgcolor="white", height=500, showlegend=False, yaxis=dict(gridcolor="rgb(230,230,230)"))
     fig_anim.layout.updatemenus[0].buttons[0].args[1]["frame"]["duration"] = 100
     fig_anim.layout.updatemenus[0].buttons[0].args[1]["transition"]["duration"] = 50
-
     st.plotly_chart(fig_anim, use_container_width=True)
 
-    # График 2 — lines days_left
-    st.subheader("📈 How Price Changes with Days Before Departure")
+    # Price vs days left
+    st.subheader("How Price Changes with Days Before Departure")
     fig2 = go.Figure()
     for cls in filtered["class"].unique():
         subset = filtered[filtered["class"] == cls].groupby("days_left")["price"].median()
@@ -290,7 +293,7 @@ else:
     )
     st.plotly_chart(fig2, use_container_width=True)
 
-    # График 3 — scatter
+    # Scatter plot duration vs price
     st.subheader("Duration vs Price")
     fig3 = px.scatter(
         filtered.sample(min(3000, len(filtered))),
@@ -302,7 +305,7 @@ else:
     fig3.update_layout(plot_bgcolor="white", height=400)
     st.plotly_chart(fig3, use_container_width=True)
 
-    # Таблица
+    # Data table
     st.subheader("Filtered Data")
     with st.expander("Show table"):
         st.dataframe(
@@ -311,5 +314,47 @@ else:
             .sort_values("price").head(50),
             use_container_width=True
         )
+
+    # --- Форма для добавления нового рейса (POST) ---
+    with st.expander("Add a new flight (POST to API)"):
+        with st.form("add_flight_form"):
+            st.subheader("New Flight Details")
+            col1, col2 = st.columns(2)
+            with col1:
+                airline = st.text_input("Airline", "IndiGo")
+                source = st.selectbox("Source city", df["source_city"].unique())
+                dest = st.selectbox("Destination city", df["destination_city"].unique())
+                dep_time = st.selectbox("Departure time", ["Early_Morning","Morning","Afternoon","Evening","Night","Late_Night"])
+                arr_time = st.selectbox("Arrival time", ["Early_Morning","Morning","Afternoon","Evening","Night","Late_Night"])
+                stops = st.selectbox("Stops", ["zero", "one", "two_or_more"])
+            with col2:
+                flight_class = st.selectbox("Class", ["Economy", "Business"])
+                duration = st.number_input("Duration (hours)", min_value=0.5, max_value=24.0, step=0.1)
+                days_left = st.number_input("Days left", min_value=1, max_value=49, step=1)
+                price = st.number_input("Price (INR)", min_value=500, max_value=200000, step=100)
+
+            submitted = st.form_submit_button("Add Flight")
+            if submitted:
+                new_flight = {
+                    "airline": airline,
+                    "source_city": source,
+                    "destination_city": dest,
+                    "departure_time": dep_time,
+                    "arrival_time": arr_time,
+                    "stops": stops,
+                    "class": flight_class,
+                    "duration": duration,
+                    "days_left": days_left,
+                    "price": price,
+                }
+                try:
+                    resp = requests.post(f"{API_URL}/flights", json=new_flight)
+                    if resp.status_code == 201:
+                        st.success("Flight added successfully! Refresh the page to see changes.")
+                        st.cache_data.clear()
+                    else:
+                        st.error(f"Failed to add flight: {resp.text}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
     st.feedback("stars")
