@@ -25,8 +25,6 @@ def load_data_from_api():
         if resp.status_code == 200:
             data = resp.json()
             df = pd.DataFrame(data["flights"])
-            if "class" in df.columns:
-                df.rename(columns={"class": "class"}, inplace=True)
             if "num_stops" not in df.columns and "stops" in df.columns:
                 df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
             if "price_per_hour" not in df.columns:
@@ -40,8 +38,14 @@ def load_data_from_api():
         return pd.DataFrame()
 
 df = load_data_from_api()
-
 if df.empty:
+    st.stop()
+
+# Проверка обязательных колонок
+required_cols = ["airline", "source_city", "destination_city", "class", "price", "duration", "days_left", "num_stops"]
+missing_cols = [col for col in required_cols if col not in df.columns]
+if missing_cols:
+    st.error(f"Missing columns: {missing_cols}")
     st.stop()
 
 # ==================== OVERVIEW ====================
@@ -53,6 +57,7 @@ if page == "Overview":
     col3.metric("Routes", df["source_city"].nunique())
     col4.metric("Avg price", f"₹{df['price'].mean():,.0f}")
     st.markdown("---")
+
     st.subheader("Dataset Description")
     st.markdown("""
     The dataset contains information about domestic flights in India.  
@@ -65,16 +70,55 @@ if page == "Overview":
     - **Days left** – days between booking and departure  
     - **Price** – ticket price in INR  
     """)
+
     st.subheader("Data Quality")
     missing = df.isnull().sum().sum()
     duplicates = df.duplicated().sum()
     if missing == 0 and duplicates == 0:
         st.success("No missing values or duplicates — dataset is clean.")
+
     st.subheader("Descriptive Statistics")
     num_cols = ["price", "duration", "days_left", "num_stops"]
     stats = df[num_cols].agg(["mean", "median", "std"]).round(2)
     st.dataframe(stats, use_container_width=True)
+
     st.markdown("---")
+
+    # --- НОВЫЕ ГРАФИКИ (не из Jupyter Notebook) ---
+    st.subheader("Additional Insights")
+
+    # 1. Количество рейсов по авиакомпаниям (столбчатая диаграмма)
+    flights_per_airline = df["airline"].value_counts().reset_index()
+    flights_per_airline.columns = ["airline", "count"]
+    fig1 = px.bar(
+        flights_per_airline, x="airline", y="count", color="airline",
+        title="Number of flights by airline",
+        labels={"airline": "Airline", "count": "Number of flights"}
+    )
+    fig1.update_layout(showlegend=False, xaxis_tickangle=-45)
+    st.plotly_chart(fig1, use_container_width=True)
+
+    # 2. Распределение цен по времени вылета (boxplot)
+    fig2 = px.box(
+        df, x="departure_time", y="price", color="class",
+        title="Price distribution by departure time and class",
+        labels={"departure_time": "Departure time", "price": "Price (INR)"},
+        color_discrete_map={"Economy": "steelblue", "Business": "tomato"}
+    )
+    fig2.update_layout(height=500)
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # 3. Средняя цена по дням до вылета (линейный график) – отдельно для Economy и Business
+    avg_price_by_days = df.groupby(["days_left", "class"])["price"].mean().reset_index()
+    fig3 = px.line(
+        avg_price_by_days, x="days_left", y="price", color="class",
+        title="Average price vs days before departure",
+        labels={"days_left": "Days left", "price": "Average price (INR)"},
+        color_discrete_map={"Economy": "steelblue", "Business": "tomato"}
+    )
+    fig3.update_layout(height=400)
+    st.plotly_chart(fig3, use_container_width=True)
+
     if st.button("Show random flight"):
         flight = df.sample(1).iloc[0]
         st.subheader(f"Flight: {flight['source_city']} -> {flight['destination_city']}")
@@ -352,6 +396,7 @@ else:
                     if resp.status_code == 201:
                         st.success("Flight added successfully! Refresh the page to see changes.")
                         st.cache_data.clear()
+                        st.rerun()
                     else:
                         st.error(f"Failed to add flight: {resp.text}")
                 except Exception as e:

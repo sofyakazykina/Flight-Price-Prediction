@@ -1,5 +1,5 @@
 """Flight Price Analysis — REST API (FastAPI)
-Run: uvicorn api:app --reload
+Run: uvicorn api:app --reload --port 8000
 Docs: http://127.0.0.1:8000/docs
 """
 
@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
 import pandas as pd
+import math
 
 app = FastAPI(
     title="Flight Price Analysis API",
@@ -21,33 +22,59 @@ def load_df() -> pd.DataFrame:
     df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
     df["price_per_hour"] = (df["price"] / df["duration"]).round(2)
     df["is_early_booking"] = (df["days_left"] > 30).astype(int)
+    # Заменяем inf и NaN на 0 для числовых колонок
+    df = df.replace([float('inf'), -float('inf')], 0)
+    numeric_cols = ["duration", "days_left", "price", "num_stops", "price_per_hour", "is_early_booking"]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    # Строковые колонки: заменяем NaN на пустую строку
+    string_cols = ["airline", "source_city", "destination_city", "departure_time", "arrival_time", "stops", "class"]
+    for col in string_cols:
+        df[col] = df[col].fillna('').astype(str)
     return df
 
 _records: list[dict] = load_df().to_dict(orient="records")
 
 def get_df() -> pd.DataFrame:
-    return pd.DataFrame(_records)
+    """Безопасное создание DataFrame без NaN."""
+    df = pd.DataFrame(_records)
+    # Приводим числовые колонки
+    numeric_cols = ["duration", "days_left", "price", "num_stops", "price_per_hour", "is_early_booking"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    # Строковые колонки
+    string_cols = ["airline", "source_city", "destination_city", "departure_time", "arrival_time", "stops", "class"]
+    for col in string_cols:
+        if col in df.columns:
+            df[col] = df[col].fillna('').astype(str)
+    return df
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
 class FlightCreate(BaseModel):
-    airline: str = Field(..., example="IndiGo")
-    source_city: str = Field(..., example="Delhi")
-    destination_city: str = Field(..., example="Mumbai")
+    airline: str = Field(..., json_schema_extra={"example": "IndiGo"})
+    source_city: str = Field(..., json_schema_extra={"example": "Delhi"})
+    destination_city: str = Field(..., json_schema_extra={"example": "Mumbai"})
     departure_time: Literal["Early_Morning","Morning","Afternoon","Evening","Night","Late_Night"]
     arrival_time:   Literal["Early_Morning","Morning","Afternoon","Evening","Night","Late_Night"]
     stops: Literal["zero", "one", "two_or_more"]
-    flight_class: Literal["Economy", "Business"] = Field(..., alias="class")
-    duration: float = Field(..., gt=0, example=2.5)
-    days_left: int  = Field(..., ge=1, le=49, example=15)
-    price: float    = Field(..., gt=0, example=5500.0)
+    flight_class: Literal["Economy", "Business"] = Field(..., alias="class", json_schema_extra={"example": "Economy"})
+    duration: float = Field(..., gt=0, json_schema_extra={"example": 2.5})
+    days_left: int  = Field(..., ge=1, le=49, json_schema_extra={"example": 15})
+    price: float    = Field(..., gt=0, json_schema_extra={"example": 5500.0})
 
     model_config = {"populate_by_name": True}
 
 
 class StatsOut(BaseModel):
     column: str
-    mean: float; median: float; std: float; min: float; max: float; count: int
+    mean: float
+    median: float
+    std: float
+    min: float
+    max: float
+    count: int
 
 # ── Filter helper ─────────────────────────────────────────────────────────────
 
@@ -99,9 +126,11 @@ def get_flights(
                        stops, price_min, price_max, days_left_min, days_left_max)
     df = df.sort_values(sort_by, ascending=(sort_order == "asc"))
     total = len(df)
-    page  = df.iloc[skip: skip + limit]
+    page = df.iloc[skip: skip + limit]
+    # Заменяем NaN на None для JSON
+    records = page.replace({float('nan'): None}).to_dict(orient="records")
     return {"total_matching": total, "skip": skip, "limit": limit,
-            "returned": len(page), "flights": page.to_dict(orient="records")}
+            "returned": len(page), "flights": records}
 
 
 @app.get("/flights/stats", response_model=list[StatsOut], tags=["Statistics"])
@@ -116,6 +145,9 @@ def get_stats(
                        None, None, None, None, None)
     if df.empty:
         raise HTTPException(404, "No flights match the given filters.")
+    # Заменяем NaN на 0 для числовых колонок
+    for col in ["price","duration","days_left","num_stops"]:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return [
         StatsOut(column=col, mean=round(df[col].mean(),2), median=round(df[col].median(),2),
                  std=round(df[col].std(),2), min=round(df[col].min(),2),
@@ -130,8 +162,8 @@ def get_airlines():
     result = []
     for airline in sorted(df["airline"].unique()):
         sub = df[df["airline"] == airline]
-        eco = sub[sub["class"] == "Economy"]["price"]
-        biz = sub[sub["class"] == "Business"]["price"]
+        eco = sub[sub["class"] == "Economy"]["price"].dropna()
+        biz = sub[sub["class"] == "Business"]["price"].dropna()
         result.append({
             "airline": airline,
             "total_flights": len(sub),
@@ -145,15 +177,35 @@ def get_airlines():
 def get_flight_by_id(flight_id: int):
     if flight_id < 0 or flight_id >= len(_records):
         raise HTTPException(404, f"Id {flight_id} not found. Range: 0–{len(_records)-1}.")
-    return _records[flight_id]
+    record = _records[flight_id].copy()
+    # Заменяем NaN на None
+    for k, v in record.items():
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            record[k] = None
+    return record
 
 
 @app.post("/flights", status_code=201, tags=["Flights"])
 def create_flight(flight: FlightCreate):
-    data = flight.model_dump(by_alias=True)
-    data["num_stops"]       = {"zero":0,"one":1,"two_or_more":2}[data["stops"]]
-    data["price_per_hour"]  = round(data["price"] / data["duration"], 2)
-    data["is_early_booking"]= int(data["days_left"] > 30)
-    _records.append(data)
-    return {"message": "Flight added successfully.",
-            "total_records": len(_records), "new_record": data}
+    try:
+        data = flight.model_dump(by_alias=True)
+        # Нормализация значений
+        data["duration"] = max(data["duration"], 0.1)
+        data["price"] = max(data["price"], 0.01)
+        data["days_left"] = max(1, min(49, data["days_left"]))
+        stops_map = {"zero": 0, "one": 1, "two_or_more": 2}
+        data["num_stops"] = stops_map.get(data["stops"], 0)
+        data["price_per_hour"] = round(data["price"] / data["duration"], 2)
+        data["is_early_booking"] = 1 if data["days_left"] > 30 else 0
+        # Проверяем строковые поля
+        for field in ["airline", "source_city", "destination_city", "departure_time", "arrival_time", "stops", "class"]:
+            if not data.get(field):
+                raise ValueError(f"Missing or empty field: {field}")
+        _records.append(data)
+        return {
+            "message": "Flight added successfully.",
+            "total_records": len(_records),
+            "new_record": data,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error adding flight: {str(e)}")
