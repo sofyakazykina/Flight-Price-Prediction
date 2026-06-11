@@ -13,7 +13,7 @@ st.markdown("---")
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
     "Choose section",
-    ["Overview", "Route Map", "Price Explorer"]
+    ["Overview", "Route Map", "Price Explorer", "Hypotheses"]
 )
 
 API_URL = "http://localhost:8000"
@@ -229,7 +229,7 @@ elif page == "Route Map":
         st.info("Not enough data to build the chart for this route.")
 
 # ==================== PRICE EXPLORER ====================
-else:
+elif page == "Price Explorer":
     st.header("Price Explorer")
     st.markdown("Use the filters to explore how price depends on different factors.")
 
@@ -273,9 +273,16 @@ else:
 
     # --- Демонстрация GET-запроса с двумя аргументами напрямую к API ---
     with st.expander("Test API GET with two arguments"):
-        st.markdown("This sends a request to `/flights?airline=IndiGo&price_max=5000`")
+        col1, col2 = st.columns(2)
+        with col1:
+            test_airline = st.selectbox("Airline", df["airline"].unique().tolist(), key="test_airline")
+        with col2:
+            test_price_max = st.number_input("Max price (INR)", min_value=500, max_value=200000, value=10000, step=500)
+
+        st.markdown(f"Request: `/flights?airline={test_airline}&price_max={test_price_max}`")
+
         if st.button("Run API GET test"):
-            params = {"airline": "IndiGo", "price_max": 5000}
+            params = {"airline": test_airline, "price_max": test_price_max, "limit": 5}
             resp = requests.get(f"{API_URL}/flights", params=params)
             if resp.status_code == 200:
                 data = resp.json()
@@ -403,3 +410,112 @@ else:
                     st.error(f"Error: {e}")
 
     st.feedback("stars")
+    
+    
+# ==================== HYPOTHESES ====================
+elif page == "Hypotheses":
+    st.header("🔬 Hypothesis Testing")
+    st.markdown("We tested two hypotheses about flight prices and durations.")
+
+    # ── Hypothesis 1 ──────────────────────────────────────────────────────────
+    st.subheader("Hypothesis 1")
+    st.markdown("""
+    **Evening and Night flights have a significantly longer median duration 
+    than Morning and Late_Night flights — even with the same number of stops.**
+    """)
+
+    time_order = ["Early_Morning", "Morning", "Afternoon", "Evening", "Night", "Late_Night"]
+    one_stop = df[df["num_stops"] == 1]
+
+    medians = one_stop.groupby("departure_time")["duration"].median().reindex(time_order)
+
+    fig_h1 = go.Figure()
+    colors = ["#a8d8ea", "#a8d8ea", "#a8d8ea", "#ff6b6b", "#ff6b6b", "#a8d8ea"]
+
+    for i, time in enumerate(time_order):
+        if time in medians.index and not pd.isna(medians[time]):
+            fig_h1.add_trace(go.Box(
+                y=one_stop[one_stop["departure_time"] == time]["duration"],
+                name=time,
+                marker_color=colors[i],
+                boxpoints=False,
+                line=dict(width=1.5),
+            ))
+
+    fig_h1.update_layout(
+        title="Duration of 1-stop flights by departure time",
+        xaxis_title="Departure time",
+        yaxis_title="Duration (hours)",
+        plot_bgcolor="white",
+        yaxis=dict(gridcolor="rgb(230,230,230)"),
+        height=500,
+        showlegend=False,
+    )
+
+    st.plotly_chart(fig_h1, use_container_width=True)
+
+    st.markdown("**Median duration by departure time:**")
+    st.dataframe(
+        medians.dropna().sort_values()
+        .reset_index()
+        .rename(columns={"departure_time": "Departure time", "duration": "Median duration (h)"})
+        .round(2),
+        use_container_width=True
+    )
+
+    st.info("""
+    **Result: Hypothesis partially confirmed.**
+    Evening (15.2h) and Night (14.8h) flights have the longest durations.
+    Late_Night (7.8h) and Morning (10.4h) are the shortest as expected.
+    However, Afternoon (8.5h) is also short — contradicting a simple "later = longer" pattern.
+    """)
+
+    st.markdown("---")
+
+    # ── Hypothesis 2 ──────────────────────────────────────────────────────────
+    st.subheader("Hypothesis 2")
+    st.markdown("""
+    **Price per hour of flight is lower for the most frequent airlines 
+    (IndiGo, Air India) compared to other airlines.**
+    """)
+
+    df["is_leader"] = df["airline"].isin(["Indigo", "Air_India"])
+    order = df.groupby("airline")["price_per_hour"].median().sort_values().index.tolist()
+
+    fig_h2 = go.Figure()
+    for airline in order:
+        subset = df[df["airline"] == airline]["price_per_hour"]
+        is_leader = airline in ["Indigo", "Air_India"]
+        fig_h2.add_trace(go.Box(
+            y=subset,
+            name=airline,
+            marker_color="tomato" if is_leader else "steelblue",
+            boxpoints=False,
+            line=dict(width=1.5),
+        ))
+
+    fig_h2.update_layout(
+        title="Price per hour by airline (leaders in red)",
+        xaxis_title="Airline",
+        yaxis_title="Price per hour (INR)",
+        plot_bgcolor="white",
+        yaxis=dict(gridcolor="rgb(230,230,230)"),
+        height=500,
+        showlegend=False,
+    )
+
+    st.plotly_chart(fig_h2, use_container_width=True)
+
+    st.markdown("**Median price per hour:**")
+    median_pph = df.groupby("airline")["price_per_hour"].median().sort_values().reset_index()
+    median_pph.columns = ["Airline", "Median price per hour (INR)"]
+    median_pph["Is leader"] = median_pph["Airline"].isin(["Indigo", "Air_India"])
+    st.dataframe(median_pph.round(2), use_container_width=True)
+
+    st.info("""
+    **Result: Hypothesis not confirmed.**
+    Air India shows a higher median price per hour than most budget airlines.
+    IndiGo has a low median price per hour, consistent with its budget positioning,
+    but Air India behaves more like a premium carrier.
+    The hypothesis holds for IndiGo but not for Air India.
+    """)
