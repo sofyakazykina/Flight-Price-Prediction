@@ -18,34 +18,14 @@ page = st.sidebar.radio(
 
 API_URL = "http://localhost:8000"
 
-@st.cache_data(ttl=60)
-def load_data_from_api():
-    try:
-        resp = requests.get(f"{API_URL}/flights", params={"limit": 500000})
-        if resp.status_code == 200:
-            data = resp.json()
-            df = pd.DataFrame(data["flights"])
-            if "num_stops" not in df.columns and "stops" in df.columns:
-                df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
-            if "price_per_hour" not in df.columns:
-                df["price_per_hour"] = df["price"] / df["duration"]
-            return df
-        else:
-            st.error(f"API error: {resp.status_code}")
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Could not connect to API: {e}")
-        return pd.DataFrame()
+@st.cache_data
+def load_data():
+    df = pd.read_csv('Clean_Dataset.csv', index_col=0)
+    df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
+    df["price_per_hour"] = df["price"] / df["duration"]
+    return df
 
-df = load_data_from_api()
-if df.empty:
-    st.stop()
-
-required_cols = ["airline", "source_city", "destination_city", "class", "price", "duration", "days_left", "num_stops"]
-missing_cols = [col for col in required_cols if col not in df.columns]
-if missing_cols:
-    st.error(f"Missing columns: {missing_cols}")
-    st.stop()
+df = load_data()
 
 #Overview
 
