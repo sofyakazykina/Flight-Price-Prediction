@@ -374,8 +374,7 @@ elif page == "Price Explorer":
                     else:
                         st.error(f"Failed: {resp.text}")
                 except Exception:
-                    st.success("Flight added successfully (demo mode — API runs locally).")
-                    st.json(new_flight)
+                    st.warning("API is not available in online mode. Run locally to use this feature.")
 
     st.feedback("stars")
     
