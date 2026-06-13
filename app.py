@@ -16,7 +16,7 @@ page = st.sidebar.radio(
     ["Overview", "Route Map", "Price Explorer", "Hypotheses"]
 )
 
-API_URL = "http://localhost:8000"
+API_URL = "https://flight-price-prediction-njpy.onrender.com"
 
 @st.cache_data
 def load_data():
