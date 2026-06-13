@@ -1,13 +1,9 @@
-"""Flight Price Analysis — REST API (FastAPI)
-Run: uvicorn api:app --reload
-Docs: http://127.0.0.1:8000/docs
-"""
+"""Run: uvicorn api:app --reload"""
 
 from fastapi import FastAPI, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
 import pandas as pd
-import math
 
 app = FastAPI(
     title="Flight Price Analysis API",
@@ -15,17 +11,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# ── Load data with cleaning ──────────────────────────────────────────────────
+#Load data with cleaning
 
 def load_df() -> pd.DataFrame:
     df = pd.read_csv("Clean_Dataset.csv", index_col=0)
-    
-    # Добавляем производные колонки
     df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
     df["price_per_hour"] = (df["price"] / df["duration"]).round(2)
     df["is_early_booking"] = (df["days_left"] > 30).astype(int)
-    
-    # Очистка от NaN и inf
     numeric_cols = ["duration", "days_left", "price", "num_stops", "price_per_hour", "is_early_booking"]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -39,18 +31,13 @@ def load_df() -> pd.DataFrame:
 _records: list[dict] = load_df().to_dict(orient="records")
 
 def get_df() -> pd.DataFrame:
-    """Возвращает чистый DataFrame без NaN и с правильными типами."""
     df = pd.DataFrame(_records)
-    
-    # Принудительно приводим числовые колонки
     numeric_cols = ["duration", "days_left", "price", "num_stops", "price_per_hour", "is_early_booking"]
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         else:
             df[col] = 0
-    
-    # Приводим строковые колонки
     string_cols = ["airline", "source_city", "destination_city", "departure_time", "arrival_time", "stops", "class"]
     for col in string_cols:
         if col in df.columns:
@@ -60,7 +47,7 @@ def get_df() -> pd.DataFrame:
     
     return df
 
-# ── Models ─────────────────────────────────────────────────────────────────────
+#Models
 
 class FlightCreate(BaseModel):
     airline: str = Field(..., json_schema_extra={"example": "IndiGo"})
@@ -76,7 +63,7 @@ class FlightCreate(BaseModel):
 
     model_config = {"populate_by_name": True}
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
+#Endpoints
 
 @app.get("/")
 def root():
@@ -117,8 +104,6 @@ def get_flights(
     
     total = len(df)
     page = df.iloc[skip: skip + limit]
-    
-    # Заменяем NaN и inf на None, чтобы JSON был валидным
     records = page.replace({float('nan'): None, float('inf'): None, -float('inf'): None}).to_dict(orient="records")
     
     return {
@@ -129,16 +114,11 @@ def get_flights(
 
 @app.post("/flights", status_code=201)
 def create_flight(flight: FlightCreate):
-    # Получаем данные с правильными алиасами
-    data = flight.model_dump(by_alias=True)
-    
-    # Добавляем производные поля
+    data = flight.model_dump(by_alias=True) 
     stops_map = {"zero": 0, "one": 1, "two_or_more": 2}
     data["num_stops"] = stops_map[data["stops"]]
     data["price_per_hour"] = round(data["price"] / data["duration"], 2)
     data["is_early_booking"] = 1 if data["days_left"] > 30 else 0
-    
-    # Убеждаемся, что все строковые поля — это строки
     for key in ["airline", "source_city", "destination_city", "departure_time", "arrival_time", "stops", "class"]:
         if key in data:
             data[key] = str(data[key])

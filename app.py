@@ -41,14 +41,14 @@ df = load_data_from_api()
 if df.empty:
     st.stop()
 
-# Проверка обязательных колонок
 required_cols = ["airline", "source_city", "destination_city", "class", "price", "duration", "days_left", "num_stops"]
 missing_cols = [col for col in required_cols if col not in df.columns]
 if missing_cols:
     st.error(f"Missing columns: {missing_cols}")
     st.stop()
 
-# ==================== OVERVIEW ====================
+#Overview
+
 if page == "Overview":
     st.header("Overview")
     col1, col2, col3, col4 = st.columns(4)
@@ -84,10 +84,8 @@ if page == "Overview":
 
     st.markdown("---")
 
-    # --- НОВЫЕ ГРАФИКИ (не из Jupyter Notebook) ---
     st.subheader("Additional Insights")
 
-    # 1. Количество рейсов по авиакомпаниям (столбчатая диаграмма)
     flights_per_airline = df["airline"].value_counts().reset_index()
     flights_per_airline.columns = ["airline", "count"]
     fig1 = px.bar(
@@ -98,7 +96,6 @@ if page == "Overview":
     fig1.update_layout(showlegend=False, xaxis_tickangle=-45)
     st.plotly_chart(fig1, use_container_width=True)
 
-    # 2. Распределение цен по времени вылета (boxplot)
     fig2 = px.box(
         df, x="departure_time", y="price", color="class",
         title="Price distribution by departure time and class",
@@ -108,7 +105,6 @@ if page == "Overview":
     fig2.update_layout(height=500)
     st.plotly_chart(fig2, use_container_width=True)
 
-    # 3. Средняя цена по дням до вылета (линейный график) – отдельно для Economy и Business
     avg_price_by_days = df.groupby(["days_left", "class"])["price"].mean().reset_index()
     fig3 = px.line(
         avg_price_by_days, x="days_left", y="price", color="class",
@@ -127,7 +123,8 @@ if page == "Overview":
         col2.metric("Price", f"₹{flight['price']:,.0f}")
         col3.metric("Class", flight["class"])
 
-# ==================== ROUTE MAP ====================
+#Route Map
+
 elif page == "Route Map":
     st.header("Route Map")
     city_coords = {
@@ -228,7 +225,8 @@ elif page == "Route Map":
     else:
         st.info("Not enough data to build the chart for this route.")
 
-# ==================== PRICE EXPLORER ====================
+#Price Explorer
+
 elif page == "Price Explorer":
     st.header("Price Explorer")
     st.markdown("Use the filters to explore how price depends on different factors.")
@@ -271,7 +269,6 @@ elif page == "Price Explorer":
 
     st.markdown("---")
 
-    # --- Демонстрация GET-запроса с двумя аргументами напрямую к API ---
     with st.expander("Test API GET with two arguments"):
         col1, col2 = st.columns(2)
         with col1:
@@ -291,7 +288,6 @@ elif page == "Price Explorer":
             else:
                 st.error("API request failed")
 
-    # Boxplot
     st.subheader("Price by Airline")
     fig1 = px.box(
         filtered, x="airline", y="price", color="class",
@@ -302,7 +298,6 @@ elif page == "Price Explorer":
     fig1.update_layout(plot_bgcolor="white", height=450)
     st.plotly_chart(fig1, use_container_width=True)
 
-    # Animated bar chart
     st.subheader("Price by Airline over Days Before Departure")
     st.caption("Press play to animate — watch how prices change as departure approaches")
     anim_data = (
@@ -324,7 +319,6 @@ elif page == "Price Explorer":
     fig_anim.layout.updatemenus[0].buttons[0].args[1]["transition"]["duration"] = 50
     st.plotly_chart(fig_anim, use_container_width=True)
 
-    # Price vs days left
     st.subheader("How Price Changes with Days Before Departure")
     fig2 = go.Figure()
     for cls in filtered["class"].unique():
@@ -344,7 +338,6 @@ elif page == "Price Explorer":
     )
     st.plotly_chart(fig2, use_container_width=True)
 
-    # Scatter plot duration vs price
     st.subheader("Duration vs Price")
     fig3 = px.scatter(
         filtered.sample(min(3000, len(filtered))),
@@ -356,7 +349,6 @@ elif page == "Price Explorer":
     fig3.update_layout(plot_bgcolor="white", height=400)
     st.plotly_chart(fig3, use_container_width=True)
 
-    # Data table
     st.subheader("Filtered Data")
     with st.expander("Show table"):
         st.dataframe(
@@ -366,7 +358,6 @@ elif page == "Price Explorer":
             use_container_width=True
         )
 
-    # --- Форма для добавления нового рейса (POST) ---
     with st.expander("Add a new flight (POST to API)"):
         with st.form("add_flight_form"):
             st.subheader("New Flight Details")
@@ -412,12 +403,12 @@ elif page == "Price Explorer":
     st.feedback("stars")
     
     
-# ==================== HYPOTHESES ====================
+#Hypotheses
+
 elif page == "Hypotheses":
-    st.header("🔬 Hypothesis Testing")
+    st.header("Hypothesis Testing")
     st.markdown("We tested two hypotheses about flight prices and durations.")
 
-    # ── Hypothesis 1 ──────────────────────────────────────────────────────────
     st.subheader("Hypothesis 1")
     st.markdown("""
     **Evening and Night flights have a significantly longer median duration 
@@ -472,7 +463,6 @@ elif page == "Hypotheses":
 
     st.markdown("---")
 
-    # ── Hypothesis 2 ──────────────────────────────────────────────────────────
     st.subheader("Hypothesis 2")
     st.markdown("""
     **Price per hour of flight is lower for the most frequent airlines 
