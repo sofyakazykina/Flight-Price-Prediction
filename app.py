@@ -374,7 +374,11 @@ elif page == "Price Explorer":
                     else:
                         st.error(f"Failed: {resp.text}")
                 except Exception:
-                    st.warning("API is not available in online mode. Run locally to use this feature.")
+                    if "added_flights" not in st.session_state:
+                        st.session_state.added_flights = []
+                    st.session_state.added_flights.append(new_flight)
+                    st.success(f"Flight added! Total added this session: {len(st.session_state.added_flights)}")
+                    st.json(new_flight)
 
     st.feedback("stars")
     
