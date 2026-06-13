@@ -377,8 +377,7 @@ elif page == "Price Explorer":
                     if "added_flights" not in st.session_state:
                         st.session_state.added_flights = []
                     st.session_state.added_flights.append(new_flight)
-                    st.success(f"Flight added! Total added this session: {len(st.session_state.added_flights)}")
-                    st.json(new_flight)
+                    st.success(f"Flight added successfully! Total added this session: {len(st.session_state.added_flights)}")
 
     st.feedback("stars")
     
