@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import requests
-
+import os
 st.set_page_config(page_title="Flight Analysis", layout="wide")
 
 st.title("Flight Analysis Dashboard")
@@ -16,7 +16,7 @@ page = st.sidebar.radio(
     ["Overview", "Route Map", "Price Explorer", "Hypotheses"]
 )
 
-API_URL = "https://flight-price-prediction-njpy.onrender.com"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 @st.cache_data(ttl=10)
 def load_data():
