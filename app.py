@@ -18,8 +18,18 @@ page = st.sidebar.radio(
 
 API_URL = "https://flight-price-prediction-njpy.onrender.com"
 
-@st.cache_data
+@st.cache_data(ttl=10)
 def load_data():
+    try:
+        resp = requests.get(f"{API_URL}/flights", params={"limit": 500000}, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            df = pd.DataFrame(data["flights"])
+            df["num_stops"] = pd.to_numeric(df["num_stops"], errors="coerce").fillna(0).astype(int)
+            df["price_per_hour"] = df["price"] / df["duration"]
+            return df
+    except Exception:
+        pass
     df = pd.read_csv('Clean_Dataset.csv', index_col=0)
     df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
     df["price_per_hour"] = df["price"] / df["duration"]
@@ -368,9 +378,11 @@ elif page == "Price Explorer":
                     "price": price,
                 }
                 try:
-                    resp = requests.post(f"{API_URL}/flights", json=new_flight, timeout=2)
+                    resp = requests.post(f"{API_URL}/flights", json=new_flight, timeout=5)
                     if resp.status_code == 201:
                         st.success("Flight added successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
                     else:
                         st.error(f"Failed: {resp.text}")
                 except Exception:
