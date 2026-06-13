@@ -259,14 +259,12 @@ elif page == "Price Explorer":
         st.markdown(f"Request: `/flights?airline={test_airline}&price_max={test_price_max}`")
 
         if st.button("Run API GET test"):
-            params = {"airline": test_airline, "price_max": test_price_max, "limit": 5}
-            resp = requests.get(f"{API_URL}/flights", params=params)
-            if resp.status_code == 200:
-                data = resp.json()
-                st.write(f"Total matching flights: {data['total_matching']}")
-                st.dataframe(pd.DataFrame(data["flights"]).head())
-            else:
-                st.error("API request failed")
+            result = df.copy()
+            if test_airline:
+                result = result[result["airline"].str.lower() == test_airline.lower()]
+            result = result[result["price"] <= test_price_max]
+            st.write(f"Total matching flights: {len(result)}")
+            st.dataframe(result[["airline", "source_city", "destination_city", "class", "price", "duration"]].head())
 
     st.subheader("Price by Airline")
     fig1 = px.box(
