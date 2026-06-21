@@ -21,7 +21,7 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 @st.cache_data(ttl=10)
 def load_data():
     try:
-        resp = requests.get(f"{API_URL}/flights", params={"limit": 500000}, timeout=10)
+        resp = requests.get(f"{API_URL}/flights", params={"limit": 500000}, timeout=90)
         if resp.status_code == 200:
             data = resp.json()
             df = pd.DataFrame(data["flights"])
@@ -378,7 +378,7 @@ elif page == "Price Explorer":
                     "price": price,
                 }
                 try:
-                    resp = requests.post(f"{API_URL}/flights", json=new_flight, timeout=5)
+                    resp = requests.post(f"{API_URL}/flights", json=new_flight, timeout=90)
                     if resp.status_code == 201:
                         st.success("Flight added successfully!")
                         st.cache_data.clear()
