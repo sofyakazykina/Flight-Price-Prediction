@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import requests
 import os
+
 st.set_page_config(page_title="Flight Analysis", layout="wide")
 
 st.title("Flight Analysis Dashboard")
@@ -18,27 +19,29 @@ page = st.sidebar.radio(
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
-@st.cache_data(ttl=10)
-def load_data():
-    try:
-        resp = requests.get(f"{API_URL}/flights", params={"limit": 50000}, timeout=90)
-        if resp.status_code == 200:
-            data = resp.json()
-            df = pd.DataFrame(data["flights"])
-            df["num_stops"] = pd.to_numeric(df["num_stops"], errors="coerce").fillna(0).astype(int)
-            df["price_per_hour"] = df["price"] / df["duration"]
-            return df
-    except Exception:
-        pass
+# ---- Base data (always from CSV — fast and reliable) ----
+@st.cache_data
+def load_base_data():
     df = pd.read_csv('Clean_Dataset.csv', index_col=0)
     df["num_stops"] = df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
     df["price_per_hour"] = df["price"] / df["duration"]
     return df
 
-df = load_data()
+base_df = load_base_data()
 
-#Overview
+# ---- Session-stored flights added via the form ----
+if "new_flights" not in st.session_state:
+    st.session_state.new_flights = []
 
+if st.session_state.new_flights:
+    new_df = pd.DataFrame(st.session_state.new_flights)
+    new_df["num_stops"] = new_df["stops"].map({"zero": 0, "one": 1, "two_or_more": 2})
+    new_df["price_per_hour"] = new_df["price"] / new_df["duration"]
+    df = pd.concat([base_df, new_df], ignore_index=True)
+else:
+    df = base_df
+
+# ==================== OVERVIEW ====================
 if page == "Overview":
     st.header("Overview")
     col1, col2, col3, col4 = st.columns(4)
@@ -73,7 +76,6 @@ if page == "Overview":
     st.dataframe(stats, use_container_width=True)
 
     st.markdown("---")
-
     st.subheader("Additional Insights")
 
     flights_per_airline = df["airline"].value_counts().reset_index()
@@ -113,8 +115,7 @@ if page == "Overview":
         col2.metric("Price", f"₹{flight['price']:,.0f}")
         col3.metric("Class", flight["class"])
 
-#Route Map
-
+# ==================== ROUTE MAP ====================
 elif page == "Route Map":
     st.header("Route Map")
     city_coords = {
@@ -215,8 +216,7 @@ elif page == "Route Map":
     else:
         st.info("Not enough data to build the chart for this route.")
 
-#Price Explorer
-
+# ==================== PRICE EXPLORER ====================
 elif page == "Price Explorer":
     st.header("Price Explorer")
     st.markdown("Use the filters to explore how price depends on different factors.")
@@ -377,26 +377,25 @@ elif page == "Price Explorer":
                     "days_left": days_left,
                     "price": price,
                 }
+                
                 try:
-                    resp = requests.post(f"{API_URL}/flights", json=new_flight, timeout=90)
-                    if resp.status_code == 201:
-                        st.success("Flight added successfully!")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(f"Failed: {resp.text}")
+                    requests.post(f"{API_URL}/flights", json=new_flight, timeout=10)
                 except Exception:
-                    if "added_flights" not in st.session_state:
-                        st.session_state.added_flights = []
-                    st.session_state.added_flights.append(new_flight)
-                    st.success(f"Flight added successfully! Total added this session: {len(st.session_state.added_flights)}")
+                    pass
+
+                st.session_state.new_flights.append(new_flight)
+                st.session_state.flight_added_msg = True
+                st.rerun()
+
+            if st.session_state.get("flight_added_msg"):
+                st.success("Flight added! It now appears in the filters, charts and Route Map.")
+                st.session_state.flight_added_msg = False
+
 
     st.feedback("stars")
-    
-    
-#Hypotheses
 
-elif page == "Hypotheses":
+# ==================== HYPOTHESES ====================
+else:
     st.header("Hypothesis Testing")
     st.markdown("We tested two hypotheses about flight prices and durations.")
 
