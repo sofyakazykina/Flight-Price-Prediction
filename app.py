@@ -21,7 +21,7 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 @st.cache_data(ttl=10)
 def load_data():
     try:
-        resp = requests.get(f"{API_URL}/flights", params={"limit": 500000}, timeout=90)
+        resp = requests.get(f"{API_URL}/flights", params={"limit": 50000}, timeout=90)
         if resp.status_code == 200:
             data = resp.json()
             df = pd.DataFrame(data["flights"])
